@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mysqlnamespace
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: mysqlnamespace
+data:
+  my.cnf: |
+    [client]
+    validationQuery=SELECT 1
+    [mysqld]
+    testWhileIdle=true
+    timeBetweenEvictionRunsMillis=28000
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv
+  namespace: mysqlnamespace
+spec:
+  storageClassName: local-storage
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  persistentVolumeReclaimPolicy: Delete
+  capacity:
+    storage: 10Gi
+  local:
+    path: /var/lib/mysql
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+              - master
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-binlog-claim
+  namespace: mysqlnamespace
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: "local-storage"
+  resources:
+    requests:
+      storage: 10Gi
+---
+
+apiVersion: apps/v1                 #版本
+kind: Deployment                    #创建资源的类型
+metadata:                           #资源的元数据
+  name: mysql-dep                   #资源的名称，是元数据必填项
+  namespace: mysqlnamespace
+spec:                               #期望状态
+  replicas: 1                       #创建的副本数量（pod数量），不填默认为1
+  selector:                         #
+    matchLabels:
+      app: mysql-pod
+  template:                         #定义pod的模板
+    metadata:                       #pod的元数据
+      labels:                       #labels标签，必填一个
+        app: mysql-pod             
+    spec:                           #pod的期望状态
+      hostNetwork: true
+      nodeName: master
+      containers:                   #容器
+      - name: mysql                 #容器名称
+        image: mysql:5.7            #镜像
+        imagePullPolicy: IfNotPresent
+        ports:                      #容器的端口
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: admin123
+        volumeMounts:
+          - name: mysql-config
+            mountPath: /etc/mysql/conf.d/my.cnf
+          - name: mysql-binlog-storage
+            mountPath: /var/lib/mysql
+      volumes:
+      - name: mysql-config
+        configMap:
+          namespace: mysqlnamespace  
+          name: mysql-config
+      - name: mysql-binlog-storage
+        persistentVolumeClaim:
+          claimName: mysql-binlog-claim
+---
+apiVersion: v1                      #版本
+kind: Service                       #创建资源的类型
+metadata:                           #资源的元数据
+  name: mysql-svc                   #资源的名称，是元数据必填项
+  namespace: mysqlnamespace
+spec:                               #期望状态
+  selector:
+    app: mysql-pod                   #服务类型
+  ports:                            #端口
+    - port: 33306
+      targetPort: 3306              #与containerPort一样
+      protocol: TCP
+      nodePort: 30306
+  type: NodePort
+#  selector:
+#app: mysql-pod
+

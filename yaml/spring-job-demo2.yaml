@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: springboot-demo
+---
+apiVersion: v1          # api版本!必须字段
+kind: Service           # 资源类型!必须字段
+metadata:               # 资源元数据!必须字段
+  name: spring-svc             # 资源名称
+  namespace: mynamespace    # 资源所在namespacs
+spec:                   # 资源规格
+  ports:                # 端口映射
+  - port: 30001            # Service端口,通过ClusterIP访问时使用的端口
+    protocol: TCP       # 端口通信的协议
+    targetPort: 8081    # 容器内的服务端口,比如tomcat是8080
+    nodePort: 30002
+  selector:             # 标签选择器,与Deployment中标签保持一致
+    app: springboot-demo            # 标签
+  type: NodePort        # Service暴露类型,NodePort允许集群外访问
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-config
+  namespace: mynamespace
+data:
+  application.properties: |-
+    spring.datasource.type=com.alibaba.druid.pool.DruidDataSource
+    spring.jpa.hibernate.ddl-auto=update
+    spring.datasource.url=jdbc:mysql://10.105.33.166:33306/demo?serverTimezone=UTC&autoReconnect=true
+    #spring.datasource.url=jdbc:mysql://10.96.74.114:33306/demo?serverTimezone=UTC&autoReconnect=true
+    spring.datasource.username=root
+    spring.datasource.password=admin123
+    spring.datasource.driver-class-name=com.mysql.jdbc.Driver
+    spring.jpa.show-sql:true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springboot-demo
+  namespace: mynamespace
+spec:
+  #serviceAccountName: my-serviceaccount
+  replicas: 1
+  selector:
+    matchLabels:
+      app: springboot-demo
+  template:
+    metadata:
+      labels:
+        app: springboot-demo
+    spec:
+     #type: NodePort
+     #ports:
+     #- port: 80
+     #  protocol: TCP
+     #  targetPort: 80
+     #  nodePort: 30009 
+      hostNetwork: true
+      nodeName: master
+      containers:
+        - name: springboot-demo
+          image: springboot-demo:latest  #镜像名称+版本
+          imagePullPolicy: IfNotPresent   #表示镜像来源，IfNotPresent本地没有就从hub仓库拉取，Never表示只从本地
+          #command: ["java", "-jar","--spring.config.location=/config/application.properties","/app/spring-k8s--1.0-SNAPSHOT/spring-k8s-1.0-SNAPSHOT.jar"]
+          command: ["java", "-jar","-Dmy.config=file:///app/application.properties","/app/spring-k8s--1.0-SNAPSHOT/spring-k8s-1.0-SNAPSHOT.jar"]
+          ports:
+            - containerPort: 8134
+          env:
+            # 指定日志文件路径
+            - name: logging.path
+              value: /var/logs
+          volumeMounts:
+           - name: my-config
+             #mountPath: /config/
+             mountPath: /app/application.properties
+             subPath: application.properties
+      strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1 #表示在 Deployment 更新过程中，最多允许几个 Pod 不可用，默认为 1，表示在更新过程中只有一个 Pod 不可用
+          maxSurge: 1 #表示在 Deployment 更新过程中，最多能同时多创建几个 Pod，默认为 1，表示在更新过程中最多能多创建一个 Pod
+      volumes:
+      - configMap:
+          name: my-config
+          namespace: mynamespace
+        name: my-config
