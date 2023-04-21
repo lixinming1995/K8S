@@ -1,0 +1,73 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: pgpool
+  namespace: pgnamespace
+  labels:
+    app: pgpool
+spec:
+  hostNetwork: true
+  nodeName: xxx
+  containers:
+    - name: pgpool
+      image: pgpool/pgpool:latest
+      imagePullPolicy: IfNotPresent
+#      command:
+#      - sh
+#      - "-c"
+#      - |
+#        chmod 777 /var/lib/pgpool-II /etc/pgpool-II
+#        set -ex
+#        apk update
+#        apk add pgpool
+#        mkdir -p /var/run/pgpool/
+#        cp /etc/pool_hba.conf.sample /etc/pool_hba.conf
+#        cat > /etc/pool_hba.conf << EOF
+#        host    all         all         all                   md5
+#        EOF
+#        cat > /etc/pool_passwd << EOF
+        #密码postgresmd5加密
+#        postgres:md5e8a48653851e28c69d0506508fb27fc5
+#        EOF
+#        pgpool -n
+      ports:
+        - name: pgpool
+          containerPort: 9999
+      env:
+        - name: PGPOOL_PARAMS_BACKEND_HOSTNAME0
+          value: xxx
+       # - name: PGPOOL_PARAMS_BACKEND_HOSTNAME1
+       #   value: xxx
+        - name: PGPOOL_PARAMS_BACKEND_PORT0
+          value: "30532"
+        - name: PGPOOL_PARAMS_BACKEND_FLAG0
+          value: "ALWAYS_PRIMARY|DISALLOW_TO_FAILOVER"
+        - name: PGPOOL_PARAMS_BACKEND_FLAG1
+          value: "DISALLOW_TO_FAILOVER"
+       # - name: PGPOOL_PARAMS_BACKEND_PORT1
+       #   value: "30532"
+      volumeMounts:
+      - name: pgpool
+        mountPath: /etc/pgpool.conf
+        subPath: pgpool.conf
+  volumes:
+  - name: pgpool
+    configMap:
+      namespace: pgnamespace
+      name: pgpool
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgpool
+  namespace: pgnamespace
+  labels:
+    app: pgpool
+spec:
+  ports:
+  - name: pgpool
+    port: 9999
+    targetPort: 9999
+  selector:
+    app: pgpool
+  type: NodePort
