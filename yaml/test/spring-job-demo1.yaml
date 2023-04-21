@@ -1,0 +1,75 @@
+apiVersion: v1          # api版本!必须字段
+kind: Service           # 资源类型!必须字段
+metadata:               # 资源元数据!必须字段
+  name: spring-svc-fegin             # 资源名称
+  namespace: mynamespace    # 资源所在namespacs
+spec:                   # 资源规格
+  #type: NodePort
+  ports:                # 端口映射
+  - port: 30003            # Service端口,通过ClusterIP访问时使用的端口
+    protocol: TCP       # 端口通信的协议
+    targetPort: 8082    # 容器内的服务端口,比如tomcat是8080
+    nodePort: 30004
+  selector:             # 标签选择器,与Deployment中标签保持一致
+    app: springboot-fegin            # 标签
+  type: NodePort        # Service暴露类型,NodePort允许集群外访问
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: springboot-fegin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springboot-fegin
+  namespace: mynamespace
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: springboot-fegin
+  template:
+    metadata:
+      labels:
+        app: springboot-fegin
+    spec:
+     # nodeSelector:
+        #beta.kubernetes.io/arch: amd64
+     #   kubernetes.io/hostname: master
+     #   kubernetes.io/hostname: master
+     # affinity:
+     #   nodeAffinity:
+     #     requiredDuringSchedulingIgnoredDuringExecution:
+     #       nodeSelectorTerms:
+     #       - matchExpressions:
+     #         - key: node-role.kubernetes.io/master
+     #           operator: DoesNotExist
+     #       - matchExpressions:
+     #         - key: kubernetes.io/hostname
+     #           operator: In
+     #           values:
+     #           - "master"
+     #           - "master"
+      #        - key: kubernetes.io/hostname
+      #          operator: In
+      #          values:
+      #          - "master"
+     #type: NodePort
+     #ports:
+     #- port: 80
+     #  protocol: TCP
+     #  targetPort: 80
+     #  nodePort: 30009 
+      hostNetwork: true
+     # nodeName: master
+      containers:
+        - name: springboot-fegin
+          image: springboot-fegin:latest  #镜像名称+版本
+          imagePullPolicy: IfNotPresent   #表示镜像来源，IfNotPresent本地没有就从hub仓库拉取，Never表示只从本地
+          ports:
+            - containerPort: 8135
+          env:
+            # 指定日志文件路径
+            - name: logging.path
+              value: /var/logs
