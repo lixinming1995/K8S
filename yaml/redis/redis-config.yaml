@@ -1,0 +1,159 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: redis-cluster-configmap # configmap的名字，加上下面的demo-redis就是这个configmap在k8s集群中的唯一标识
+  namespace: redisnamespace
+data:
+  # 这里可以创建多个文件
+  redis.conf: |
+    appendonly yes
+    protected-mode no
+    cluster-enabled yes          
+    cluster-config-file /var/lib/redis/nodes.conf 
+    cluster-node-timeout 5000    
+    dir /var/lib/redis        
+    port 6379
+#---
+#kind: StorageClass
+#apiVersion: storage.k8s.io/v1
+#metadata:
+#  namespace: redisnamespace
+#  name: redis-local-storage # StorageClass的name，后面需要声明使用的是这个StorageClass时都是用这个名字
+#provisioner: kubernetes.io/no-provisioner
+#volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: redis-pv1
+  namespace: redisnamespace
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: redis-local-storage  # 上面创建的StorageClass
+  local:
+    path: /usr/local/redis-pv # 创建local pv使用的宿主机目录，可以自己指定
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname # k8s node的标签，结合下面的ip，该标签为kubernetes.io/hostname=192.168.0.152
+          operator: In
+          values:
+          - xxx  # localpv创建在192.168.0.152这台机器上
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: redisnamespace
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: "redis-local-storage"
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless-service
+  namespace: redisnamespace
+  labels:
+    app: redis
+spec:
+  ports:
+   - port: 6379
+     targetPort: 6379
+     protocol: TCP
+     nodePort: 30379
+  type: NodePort
+  selector:
+    app: redis
+    appCluster: redis-cluster
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-app
+  namespace: redisnamespace
+spec:
+  serviceName: redis-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+      appCluster: redis-cluster
+  template:
+    metadata:
+      labels:
+        app: redis
+        appCluster: redis-cluster
+    spec:
+      hostNetwork: true
+      nodeName: xxx
+      terminationGracePeriodSeconds: 20
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - redis
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: redis
+        image: redis:latest
+        imagePullPolicy: IfNotPresent
+        command:
+          - "redis-server"                  #redis启动命令
+        args:
+          - "/etc/redis/redis.conf"         #redis-server后面跟的参数,换行代表空格
+          - "--protected-mode"              #允许外网访问
+          - "no"
+        resources:                        
+          requests:                         # 每个pod请求的资源
+            cpu: 2000m                      # m代表千分之，这里申请2个逻辑核
+            memory: 4Gi                     # 内存申请4G大小
+          limits:                           # 资源限制
+            cpu: 2000m                     
+            memory: 4Gi 
+        ports:
+            - name: redis
+              containerPort: 6379
+              protocol: "TCP"
+        volumeMounts:
+          - name: redis-conf              # 把下面创建的redis.conf配置文件挂载到容器的/etc/redis目录下
+            mountPath: /etc/redis        
+          - name: redis-data-pv              # 把叫做redis-data的volume挂载到容器的/var/lib/redis目录
+            mountPath: /var/lib/redis
+      volumes:
+      - name: redis-conf                  # 船舰一个名为redis-conf的volumes  
+        configMap:
+          name: redis-cluster-configmap   # 引用上面创建的configMap卷
+          namespace: redisnamespace
+          items:
+            - key: redis.conf             # configmap里面的redis.conf
+              path: redis.conf            # configmap里面的redis.conf放到volumes中叫做redistribution.conf
+      - name: redis-data-pv
+        persistentVolumeClaim:
+          claimName: redis-pvc
+#  volumeClaimTemplates:                   # pod使用哪个pvc，这里是通过StorageClass自动创建pvc并对应上pv
+#  - metadata:
+#      name: redis-data                    # pvc创建一个volumes叫做redis-data
+#      namespace: redisnamespace
+#    spec:
+#      accessModes:
+#      - ReadWriteOnce
+#      storageClassName: redis-local-storage
+#      resources:
+#        requests:  
+#          storage: 5Gi
